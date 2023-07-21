@@ -59,6 +59,12 @@
 import pyspark.sql.functions as F
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+#needs more spaces!
+
+
+
+
+#
 
 # COMMAND ----------
 
@@ -161,10 +167,6 @@ CREATE TABLE ihq_prd_usertbls.intent_pattern_weights VALUES ('tsip', 'www.t-mobi
 
 # MAGIC %md
 # MAGIC ## Regression Scoring (implicit noise removal)
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
@@ -332,25 +334,5 @@ sftp> put odbc_weekly_line_scores/* odbc_weekly_line_scores
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
 # MAGIC %sql
 # MAGIC select max(report_month) from vz_feeds.mvp
-
-# COMMAND ----------
-
-
