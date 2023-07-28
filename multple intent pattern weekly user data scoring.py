@@ -5,29 +5,20 @@ from dateutil.relativedelta import relativedelta
 
 # COMMAND ----------
 
-
-# 
-
-# COMMAND ----------
-
 ##### variable setting
 intent_pattern_name = "TSIP"
 agg_period = 7
-yyyymmdd_str = '20230428' # for prod date should always be a Friday if agg_period = 7
+yyyymmdd_str = '20230721' # for prod date should always be a Friday if agg_period = 7
 # production score table eg. for intenders: 
 #   ihq_prd_usertbls.intent_pattern_weekly_line_scores
 # stage table eg. for validation and testing new versions and tags: 
-#   ihq_prd_usertbls.intent_pattern_scores_test
-target_score_table = 'ihq_prd_usertbls.intent_pattern_scores_test'
+#   ihq_prd_usertbls.ip_weekly_lines_scores_test
+target_score_table = 'ihq_prd_usertbls.ip_weekly_lines_scores_test'
 # production weight table eg. for intenders: 
 #   ihq_prd_usertbls.intent_pattern_weights
 # stage weight table eg. for validation and testing new versions and tags: 
 #   ihq_prd_usertbls.intent_pattern_weights_test
 target_weight_table = 'ihq_prd_usertbls.intent_pattern_weights_test'
-
-
-
-
 
 ##### automated variables
 datetime_now = datetime.now()
@@ -160,6 +151,13 @@ print(target_score_table)
 
 # COMMAND ----------
 
+print(f"DROP TABLE {target_score_table};\nCREATE TABLE {target_score_table}\n(line_id string,\nintent_pattern_tag string,\nweek string,\nversion string,\nscore tinyint,\nupload_dt string, \nscore_float double);")
+print("ALTER TABLE ihq_prd_usertbls.intent_pattern_weekly_line_scores CHANGE score score_float DOUBLE;")
+print("ALTER TABLE ihq_prd_usertbls.intent_pattern_weekly_line_scores ADD COLUMNS (score TINYINT);")
+
+
+# COMMAND ----------
+
 print(f"\n------ subset weblogs\nDROP TABLE ihq_prd_usertbls.intent_pattern_weekly;\nCREATE TABLE ihq_prd_usertbls.intent_pattern_weekly AS SELECT a.line_id, a.year, a.month, a.day, a.hour, a.http_host FROM (SELECT a.* FROM ihq_prd_allvm.cust_inet_brwsng_new_v a WHERE year >= '{year_start}' and month >= '{month_start}' AND http_host in (select distinct(http_host) as http_host from {target_weight_table} where intent_pattern_tag = '{intent_pattern_name}') and date_time >= '{yyyymmdd_start}' AND date_time < '{yyyymmdd_end+relativedelta(days=1)}') a;\nINSERT INTO ihq_prd_usertbls.intent_pattern_weekly SELECT b.line_id, b.year, b.month, b.day, b.hour, \"speedtest.t-mobile.com\" as http_host FROM (SELECT b.* FROM ihq_prd_allvm.cust_inet_brwsng_new_v b WHERE year >= '{year_start}' and month >= '{month_start}' AND http_host like '%speedtest.t-mobile.com%') b WHERE date_time >= '{yyyymmdd_start}' AND date_time < '{yyyymmdd_end+relativedelta(days=1)}';")
 print(f"\n------ marginal sample (ie. per line_id, lines common denominator) daily and weekly\nDROP TABLE ihq_prd_usertbls.intent_pattern_line_scores;\nCREATE TABLE ihq_prd_usertbls.intent_pattern_line_scores\n(line_id string,\nhttp_host string,\nday string,\ncount_lhd bigint,\ncount_ld bigint,\ncountd_ld bigint);\nwith a as (select line_id, http_host, day, count(*) as count_lhd from ihq_prd_usertbls.intent_pattern_weekly group by line_id, http_host, day), b as (select line_id, day, count(*) as count_ld from ihq_prd_usertbls.intent_pattern_weekly group by line_id, day), c as (select line_id, day, count(distinct(http_host)) as countd_ld from ihq_prd_usertbls.intent_pattern_weekly group by line_id, day), d as (select a.line_id, a.http_host, a.day, a.count_lhd, b.count_ld from a inner join b on a.line_id=b.line_id and a.day=b.day), e as (select d.line_id, d.http_host, d.day, d.count_lhd, d.count_ld, c.countd_ld from d inner join c on d.line_id=c.line_id and d.day=c.day) INSERT INTO ihq_prd_usertbls.intent_pattern_line_scores select e.line_id, e.http_host, e.day, e.count_lhd, e.count_ld, e.countd_ld from e;\nINSERT INTO ihq_prd_usertbls.intent_pattern_line_scores select line_id, http_host, '{score_period}' as day, sum(count_lhd) as count_lhd, sum(count_ld) as count_ld, sum(countd_ld) as countd_ld from ihq_prd_usertbls.intent_pattern_line_scores group by line_id, http_host;")
 print(f"\n------ the population (ie. across all line_ids, hosts common denominator) daily and weekly\nDROP TABLE ihq_prd_usertbls.intent_pattern_day_scores;\nCREATE TABLE ihq_prd_usertbls.intent_pattern_day_scores\n(day string,\nhttp_host string,\ncount_hd bigint,\ncount_d bigint,\ncountd_d bigint);\nwith a as (select day, http_host, count(*) as count_hd from ihq_prd_usertbls.intent_pattern_weekly group by day, http_host), b as (select day, count(*) as count_d from ihq_prd_usertbls.intent_pattern_weekly group by day), c as (select day, count(distinct(http_host)) as countd_d from ihq_prd_usertbls.intent_pattern_weekly group by day), d as (select a.day, a.http_host, a.count_hd, b.count_d from a inner join b on a.day=b.day), e as (select d.day, d.http_host, d.count_hd, d.count_d, c.countd_d from d inner join c on d.day=c.day) INSERT INTO ihq_prd_usertbls.intent_pattern_day_scores select e.day, e.http_host, e.count_hd, e.count_d, e.countd_d from e;\nINSERT INTO ihq_prd_usertbls.intent_pattern_day_scores select '{score_period}' as day, http_host, sum(count_hd) as count_hd, sum(count_d) as count_d, sum(countd_d) as countd_d from ihq_prd_usertbls.intent_pattern_day_scores group by http_host;")
@@ -169,7 +167,65 @@ print(f"\n------ subset, scale, and insert into final table\nwith b as (select a
 
 # COMMAND ----------
 
+print(f"\n------ subset, scale, and insert into final table\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), d as (select c.* from (select c.* from ihq_prd_usertbls.intent_pattern_weekly_line_scores_raw c inner join b on b.line_id=c.line_id and b.day=c.week where b.count_distinct_host >=5 and b.day = '{score_period}') c ), e as (select percentile_approx(d.score, 0.0015) as left_point_15_centile_score from d group by d.week, d.version), f as (select percentile_approx(d.score, 0.16) as sixteen_tile_score from d group by d.week, d.version), g as (select ipwlsr.* from ihq_prd_usertbls.intent_pattern_weekly_line_scores_raw ipwlsr cross join e where e.left_point_15_centile_score <= ipwlsr.score), z as (select g.line_id, g.intent_pattern_tag, g.week as week_thru, g.version, g.score/f.sixteen_tile_score as score_float, g.qload_dt as upload_dt from g cross join f) INSERT INTO TABLE {target_score_table} select z.line_id, z.intent_pattern_tag, z.week_thru, z.version, NTILE(100) OVER(PARTITION BY z.week_thru ORDER BY z.score_float asc) as score, z.upload_dt, z.score_float from z;\n")
+
+# COMMAND ----------
+
+select min(score_float) from ihq_prd_usertbls.ip_weekly_lines_scores_test limit 10;
+select max(score_float) from ihq_prd_usertbls.ip_weekly_lines_scores_test limit 10;
+select min(score) from ihq_prd_usertbls.ip_weekly_lines_scores_test limit 10;
+select max(score) from ihq_prd_usertbls.ip_weekly_lines_scores_test limit 10;
+
+
+# COMMAND ----------
+
+with CTE AS (
+SELECT
+line_id,
+score,
+NTILE(100) OVER(PARTITION BY z.week_thru ORDER BY z.score_float asc) score
+FROM ihq_prd_usertbls.intent_pattern_weekly_line_scores
+WHERE intent_pattern_tag = 'TSIP' AND week_thru = '20230422_thru_20230428'
+)
+
+SELECT score, min(score), max(score), COUNT(distinct line_id) 
+FROM CTE 
+group by tsip_intent_pattern_decile 
+order by tsip_intent_pattern_decile;
+
+# COMMAND ----------
+
 print(f"------lines with 5of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host >=5 and b.day = '{score_period}';")
+
+# COMMAND ----------
+
+print(f"------lines with 1of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==1 and b.day = '{score_period}';")
+print(f"------lines with 2of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==2 and b.day = '{score_period}';")
+print(f"------lines with 3of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==3 and b.day = '{score_period}';")
+print(f"------lines with 4of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==4 and b.day = '{score_period}';")
+print(f"------lines with 5of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==5 and b.day = '{score_period}';")
+print(f"------lines with 6of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ), c as (select * from b inner join ihq_prd_usertbls.intent_pattern_weekly_line_scores d on b.line_id=d.line_id) select count(distinct(c.line_id)) from c where b.count_distinct_host ==6 and b.day = '{score_period}';")
+
+
+# COMMAND ----------
+
+print(f"------lines with 1of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==1 and b.day = '{score_period}';")
+print(f"------lines with 2of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==2 and b.day = '{score_period}';")
+print(f"------lines with 3of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==3 and b.day = '{score_period}';")
+print(f"------lines with 4of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==4 and b.day = '{score_period}';")
+print(f"------lines with 5of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==5 and b.day = '{score_period}';")
+print(f"------lines with 6of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_line_scores where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==6 and b.day = '{score_period}';")
+
+
+# COMMAND ----------
+
+print(f"------lines with 6of6 green dots\nwith b as (select a.day, a.line_id, a.count_distinct_host from (select day, line_id, count(distinct(http_host)) count_distinct_host from ihq_prd_usertbls.intent_pattern_weekly where http_host in ('smetrics.t-mobile.com','tmobile.demdex.net','www.t-mobile.com','casi.t-mobile.com', 'brass.account.t-mobile.com', 'speedtest.t-mobile.com') group by line_id, day) a ) select count(distinct(b.line_id)) from b where b.count_distinct_host ==6 and b.day = '{score_period}';")
+# print(f"SELECT b.line_id, b.year, b.month, b.day, b.hour, "speedtest.t-mobile.com" as http_host FROM (SELECT b.* FROM ihq_prd_allvm.cust_inet_brwsng_new_v b WHERE year >= '2023' and month >= '7' AND http_host like '%speedtest.t-mobile.com%') b WHERE date_time >= '2023-07-15 00:00:00' AND date_time < '2023-07-22 00:00:00';")
+
+# COMMAND ----------
+
+# select * from ihq_prd_usertbls.intent_pattern_weekly where http_host == 'speedtest.t-mobile.com' limit 20; , "speedtest.t-mobile.com" as speed_test
+SELECT b.line_id, b.year, b.month, b.day, b.hour, http_host FROM ihq_prd_allvm.cust_inet_brwsng_new_v b WHERE year >= '2023' AND month == '7' AND day in ('15', '16', '17', '18', '19', '20', '21') AND http_host like '%speedtest.t-mobile.com%' limit 40;
 
 # COMMAND ----------
 
